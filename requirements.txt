@@ -1,0 +1,35 @@
+# Dependencias de ejecución de text-analizer.
+#
+#     pip install -r requirements.txt
+#
+# La lista es corta a propósito. Verificado escaneando los imports de todo el
+# repo: fuera de estas dos, todo el código (nlp_local incluido) usa solo la
+# biblioteca estándar — json, os, re, time, urllib.
+
+# --------------------------------------------------------------------------
+# google-cloud-language: necesaria SIEMPRE, incluso si solo usas el motor local
+# --------------------------------------------------------------------------
+# Puede sorprender, así que conviene explicarlo: nlp_local no llama a Google,
+# pero sí reutiliza sus clases proto para construir las respuestas. Es lo que
+# hace que la compatibilidad sea exacta y no aproximada —
+# isinstance(r, language_v1.AnalyzeEntitiesResponse) es cierto y los enums son
+# los mismos objetos— en vez de tener que reimplementar el modelo de datos.
+#
+# Piso en 2.13: por debajo no está `moderate_text` ni el módulo `language_v2`,
+# que este repo usa en sample_moderate_text y sample_moderate_text_v2.
+# Techo en 3.0 porque un cambio de major puede mover los protos.
+# Verificado contra 2.20.0.
+google-cloud-language>=2.13.0,<3.0.0
+
+# --------------------------------------------------------------------------
+# six: vestigio, se usa en UNA línea
+# --------------------------------------------------------------------------
+# main.py hace `isinstance(content, six.binary_type)` en sample_analyze_sentiment
+# (una sola aparición en todo el repo). Es un resto de compatibilidad con
+# Python 2 que sobra en un proyecto que ya requiere 3.10+: `six.binary_type` es
+# literalmente `bytes`.
+#
+# Se mantiene para no cambiar el comportamiento del ejemplo original. Si
+# quieres quitar la dependencia, sustituye esa línea por `isinstance(content,
+# bytes)` y borra tanto el import como este renglón.
+six>=1.16.0

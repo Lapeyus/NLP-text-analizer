@@ -1,0 +1,17 @@
+# Dependencias de desarrollo.
+#
+#     pip install -r requirements-dev.txt
+#
+# Incluye las de ejecución. Nada de esto hace falta para USAR el proyecto: el
+# arnés de paridad (parity/) corre solo con la biblioteca estándar más
+# google-cloud-language, así que lo de aquí abajo es puramente herramienta.
+
+-r requirements.txt
+
+# Formateo y estilo.
+black>=24.0
+ruff>=0.5
+
+# Pruebas. El repo no trae suite propia todavía; el equivalente funcional es
+# `python -m parity.harness`, que compara contra la API real de Google.
+pytest>=8.0

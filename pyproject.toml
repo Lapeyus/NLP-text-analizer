@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "text-analizer"
+version = "0.1.0"
+description = "Análisis de lenguaje natural con dos motores intercambiables: Google Cloud NL y un LLM local vía Ollama"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+# Por qué 3.10 y no 3.9:
+# google-cloud-language admite 3.9, pero sus propias librerías emiten
+# FutureWarning en cada import avisando de que ya no la soportan y que dejarán
+# de publicar arreglos. Correr el proyecto en 3.9 funciona pero llena la salida
+# de ruido. 3.10 es el primer intérprete donde no aparece ese aviso.
+
+keywords = ["nlp", "google-cloud-language", "ollama", "llm", "sentiment", "ner"]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
+
+# Ver requirements.txt para el razonamiento de cada pin. Se duplican aquí a
+# propósito: requirements.txt es para instalar el entorno de trabajo y
+# pyproject.toml para instalar el paquete; quien haga `pip install .` no pasa
+# por el primero.
+dependencies = [
+    "google-cloud-language>=2.13.0,<3.0.0",
+    "six>=1.16.0",
+]
+
+[project.optional-dependencies]
+dev = ["black>=24.0", "ruff>=0.5", "pytest>=8.0"]
+
+[project.scripts]
+# Equivalentes instalables de ./analyze-google y ./analyze-local. Tras
+# `pip install -e .` quedan en el PATH del entorno virtual y funcionan desde
+# cualquier directorio, no solo desde la raíz del repo.
+analyze = "analyze:main"
+
+[project.urls]
+Homepage = "https://github.com/josephvillarreal/text-analizer"
+
+[tool.setuptools]
+# El repo es un conjunto de scripts en la raíz más dos paquetes, no un layout
+# src/. Se listan explícitamente para que setuptools no intente empaquetar
+# cosas como parity/.cache_google.json.
+packages = ["nlp_local"]
+py-modules = ["analyze", "main"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# E501 lo cubre black; los módulos de prompts tienen cadenas largas que no
+# conviene partir porque son texto que lee un modelo.
+ignore = ["E501"]

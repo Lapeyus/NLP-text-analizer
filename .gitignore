@@ -129,3 +129,18 @@ dmypy.json
 .pyre/
 
 key.json
+# nlp_local / parity: cachés de inferencia y del maestro
+nlp_local/.cache_llm.json
+parity/.cache_google.json
+*.tmp
+nlp_local/.cache_wikidata.json
+
+# Entorno virtual
+.venv/
+venv/
+ENV/
+
+# Empaquetado
+*.egg-info/
+build/
+dist/

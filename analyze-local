@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""
+Analiza texto con un LLM local vía Ollama, sin enviar nada a Google.
+
+    ./analyze-local sentiment "The food was amazing but the service was terrible."
+    ./analyze-local entities  "Apple opened a new store in Mexico City."
+    ./analyze-local --model qwen3.5:9b-mlx moderate "..."
+    ./analyze-local --entity-linking link "Tesla opened a factory in Berlin."
+
+Requiere: Ollama corriendo en localhost:11434 con un modelo descargado.
+No consume cuota, no necesita credenciales y funciona sin conexión — salvo
+--entity-linking, que consulta Wikidata.
+
+Es un atajo de `analyze.py --backend local`; acepta las mismas opciones.
+Para contrastar contra la API oficial, usa `analyze.py --compare`.
+"""
+
+import sys
+
+from analyze import main
+
+if __name__ == "__main__":
+    argv = [a for a in sys.argv[1:] if a != "--backend"]
+    sys.exit(main(argv + ["--backend", "local"]))
