@@ -1,6 +1,8 @@
 # text-analizer
 
-Análisis de lenguaje natural con **dos motores intercambiables**:
+Análisis de lenguaje natural con **dos motores intercambiables**: la API de **Google Cloud Natural Language** y un
+**LLM local vía [Ollama](https://ollama.com)**. Los dos exponen la misma interfaz y devuelven los mismos tipos, así
+que cambiar de uno a otro es una línea de import.
 
 | | **Google Cloud NL** | **LLM local (Ollama)** |
 |---|---|---|
@@ -12,28 +14,92 @@ Análisis de lenguaje natural con **dos motores intercambiables**:
 | Precisión | La referencia | **94.4/100** de paridad medida |
 | Entity linking | Knowledge Graph nativo | Wikidata (7/7 exactos) |
 
-Los dos exponen **la misma interfaz** y devuelven **los mismos tipos**. Cambiar de uno a otro es una línea:
-
 ```python
 from google.cloud import language_v1     # nube
 from nlp_local import language_v1        # local — todo lo demás igual
 ```
 
-No es un parecido: `nlp_local` devuelve los objetos proto reales de `google-cloud-language`, así que `isinstance(r, language_v1.AnalyzeEntitiesResponse)` es cierto y los enums son los mismos objetos.
+No es un parecido: `nlp_local` devuelve los objetos proto reales de `google-cloud-language`, así que
+`isinstance(r, language_v1.AnalyzeEntitiesResponse)` es cierto y los enums son los mismos objetos.
+
+**Documentación técnica:** [Arquitectura](docs/ARCHITECTURE.md) · [Especificación](docs/SPEC.md) ·
+[Pruebas](docs/TESTING.md) · [Arnés de paridad](parity/README.md)
+
+---
+
+## Contenido
+
+- [Funciones principales](#funciones-principales)
+- [Arquitectura en breve](#arquitectura-en-breve)
+- [¿Cuál de los dos uso?](#cuál-de-los-dos-uso)
+- [Empezar en dos minutos](#empezar-en-dos-minutos)
+- [Los tres ejecutables](#los-tres-ejecutables)
+- [Paridad medida](#paridad-medida)
+- [Estructura del repo](#estructura-del-repo)
+- [Configuración](#configuración)
+- [Pruebas](#pruebas)
+- [Estado y limitaciones](#estado-y-limitaciones)
+- [Catálogo de análisis](#catálogo-de-análisis) (guía de uso de cada análisis)
+- [v1 vs. v2 de la API](#v1-vs-v2-de-la-api)
+- [Instalación detallada](#instalación-detallada)
+
+---
+
+## Funciones principales
+
+- **CLI unificado** (`analyze.py`) con 9 análisis: `sentiment`, `sentences`, `entities`, `entity-sentiment`,
+  `classify`, `moderate`, `syntax`, `link`, `annotate`; motor elegible con `--backend` y comparación lado a lado
+  con `--compare`.
+- **`nlp_local`**: reemplazo directo de `google.cloud.language_v1.LanguageServiceClient` respaldado por un LLM
+  local; mismas firmas, mismos protos de respuesta y mismos errores (por ejemplo, `InvalidArgument` en
+  `classify_text` con textos de menos de 20 tokens).
+- **Entity linking local** contra Wikidata (opcional), que reproduce los identificadores del Knowledge Graph.
+- **Arnés de paridad** (`parity/`) que usa a Google como maestro y puntúa cuánto se parece el motor local.
+- **Referencia comentada** (`main.py`) de los 12 análisis de la API de Google, con salidas reales medidas.
+
+---
+
+## Arquitectura en breve
+
+```mermaid
+flowchart LR
+    U["Terminal: analyze.py, analyze-google, analyze-local"] --> CC{"crear_cliente(backend)"}
+    PY["Tu programa Python"] -->|"from nlp_local import language_v1"| NL
+    CC -->|"google"| GC["google.cloud.language_v1"]
+    CC -->|"local"| NL["nlp_local.LanguageServiceClient"]
+    GC -->|"HTTPS"| GNL["Google Cloud Natural Language"]
+    NL --> PR["prompts.py"]
+    NL --> BK["backend.py + caché en disco"]
+    BK -->|"POST /api/chat"| OL["Ollama en localhost:11434"]
+    NL --> CV["convert.py: JSON a protos de Google"]
+    NL -.->|"solo con --entity-linking"| WD["Wikidata"]
+    PAR["parity/: arnés de paridad"] --> GC
+    PAR --> NL
+```
+
+El motor se elige **una sola vez**, al construir el cliente; a partir de ahí el código es idéntico. El detalle de
+componentes, flujos y decisiones está en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
 ## ¿Cuál de los dos uso?
 
-**Usa Google** cuando necesites la respuesta de referencia: producción con presupuesto, *entity linking* contra el Knowledge Graph, o cuando otro sistema ya depende de sus valores exactos.
+**Usa Google** cuando necesites la respuesta de referencia: producción con presupuesto, *entity linking* contra el
+Knowledge Graph, o cuando otro sistema ya depende de sus valores exactos.
 
-**Usa el local** cuando el texto no deba salir de tu máquina (datos personales, clínicos, contratos), cuando proceses volumen alto y la cuota se dispare, cuando trabajes sin conexión, o para **iterar barato**: desarrollas contra el local y validas contra Google solo al final.
+**Usa el local** cuando el texto no deba salir de tu máquina (datos personales, clínicos, contratos), cuando
+proceses volumen alto y la cuota se dispare, cuando trabajes sin conexión, o para **iterar barato**: desarrollas
+contra el local y validas contra Google solo al final.
 
-Y son combinables: prototipa en local, verifica con `--compare`, y decide por análisis. La paridad no es uniforme — `syntax` está en 98.5 y `sentiment` en 89.6.
+Y son combinables: prototipa en local, verifica con `--compare`, y decide por análisis. La paridad no es uniforme —
+`syntax` está en 98.5 y `sentiment` en 89.6.
 
 ---
 
 ## Empezar en dos minutos
+
+**Requisitos:** Python 3.10 o superior, y al menos uno de los dos motores (credenciales de Google Cloud con la API
+habilitada, u Ollama con un modelo descargado).
 
 Un solo comando crea el entorno virtual, instala todo y te dice qué falta para cada motor:
 
@@ -67,6 +133,13 @@ Necesitas [Ollama](https://ollama.com) con un modelo descargado:
 ollama pull qwen3:32b
 ```
 
+El modelo por defecto del código es `qwen3.8:27b-mlx` (`nlp_local/backend.py`). Si descargaste otro, indícalo con
+`NLP_LOCAL_MODEL` o con `--model`; si no, Ollama responderá que el modelo no existe:
+
+```bash
+export NLP_LOCAL_MODEL=qwen3:32b
+```
+
 ```bash
 ./analyze-local sentiment "The food was amazing but the service was terrible."
 ```
@@ -89,7 +162,8 @@ No hace falta configurar los dos. `setup.sh` comprueba cada uno por separado y t
 | [`analyze-google`](analyze-google) | Atajo que fuerza la API de Google |
 | [`analyze-local`](analyze-local) | Atajo que fuerza el LLM local |
 
-Los tres aceptan las mismas opciones y estos análisis: `sentiment`, `sentences`, `entities`, `entity-sentiment`, `classify`, `moderate`, `syntax`, `link`, `annotate`.
+Los tres aceptan las mismas opciones y estos análisis: `sentiment`, `sentences`, `entities`, `entity-sentiment`,
+`classify`, `moderate`, `syntax`, `link`, `annotate`.
 
 ```bash
 ./analyze-local entities "Apple opened a new store in Mexico City."
@@ -107,7 +181,17 @@ cat resenas.txt | ./analyze-local --model qwen3.5:9b-mlx sentences
 ./analyze-local --entity-linking link "Tesla opened a factory in Berlin."
 ```
 
-Opciones útiles: `--model` (modelo de Ollama), `--language es`, `--html`, `--file`, y stdin.
+| Opción | Efecto |
+|---|---|
+| `--backend {google,local}` | Motor (por defecto `google`) |
+| `--compare` | Corre los dos motores y los muestra lado a lado |
+| `--model` | Modelo de Ollama (solo local) |
+| `--entity-linking` | Enlaza entidades contra Wikidata (solo local; requiere red) |
+| `--file` | Lee el texto de un archivo; también se acepta stdin |
+| `--language es` | Idioma del documento; si se omite, se detecta |
+| `--html` | Trata la entrada como HTML |
+
+La referencia completa de argumentos, salidas y códigos de salida está en [docs/SPEC.md](docs/SPEC.md#41-cli-analyzepy).
 
 ### `--compare`: los dos, lado a lado
 
@@ -125,15 +209,19 @@ store        LOCATION      salience=0.317     | store        LOCATION      salie
 Mexico City  LOCATION      salience=0.036     | Mexico City  LOCATION      salience=0.040
 ```
 
-La paridad llega hasta los errores: un texto demasiado corto para `classify` lanza `InvalidArgument(400)` con el mismo mensaje en ambos.
+La paridad llega hasta los errores: un texto demasiado corto para `classify` lanza `InvalidArgument(400)` con el
+mismo mensaje en ambos.
 
-> **Nota de diseño.** En [`analyze.py`](analyze.py) no hay ni un `if backend == ...` dentro de la lógica de análisis. El motor se elige una vez al construir el cliente y a partir de ahí el código es idéntico. Ese archivo existe, en parte, para demostrarlo de forma ejecutable.
+> **Nota de diseño.** En [`analyze.py`](analyze.py) no hay ni un `if backend == ...` dentro de la lógica de
+> análisis. El motor se elige una vez al construir el cliente y a partir de ahí el código es idéntico. Ese archivo
+> existe, en parte, para demostrarlo de forma ejecutable.
 
 ---
 
 ## Paridad medida
 
-El arnés de [`parity/`](parity/README.md) usa la API de Google **como maestro**: corre ambas implementaciones sobre el mismo corpus y puntúa cuánto se parecen.
+El arnés de [`parity/`](parity/README.md) usa la API de Google **como maestro**: corre ambas implementaciones sobre
+el mismo corpus y puntúa cuánto se parecen.
 
 ```bash
 python -m parity.harness
@@ -155,35 +243,104 @@ Lo que más rindió no fueron ajustes de prompt sino **tres leyes estructurales*
 - La `magnitude` es la **suma de |score|** por oración.
 - La `salience` de todas las entidades **suma exactamente 1.0**.
 
-Explotarlas cambió el diseño: al modelo local se le piden solo cantidades primitivas y el resto se **deriva aritméticamente**, en vez de pedirle números que daba fuera de escala (8.5 donde Google decía 1.8).
+Explotarlas cambió el diseño: al modelo local se le piden solo cantidades primitivas y el resto se **deriva
+aritméticamente**, en vez de pedirle números que daba fuera de escala (8.5 donde Google decía 1.8).
 
-En [`parity/README.md`](parity/README.md) está el método completo, cómo pasó el *entity linking* de 0/7 a 7/7 vía Wikidata, y las **divergencias que no se pueden cerrar** — incluida una inconsistencia del propio Google, que puntúa `+0.20` una frase en español y `−0.40` su equivalente en inglés.
+En [`parity/README.md`](parity/README.md) está el método completo, cómo pasó el *entity linking* de 0/7 a 7/7 vía
+Wikidata, y las **divergencias que no se pueden cerrar** — incluida una inconsistencia del propio Google, que puntúa
+`+0.20` una frase en español y `−0.40` su equivalente en inglés. Las fórmulas de cada métrica están en
+[docs/SPEC.md](docs/SPEC.md#6-paridad-google-vs-local).
 
 ---
 
-## Estructura
+## Estructura del repo
 
 ```
 setup.sh              crea el venv, instala y comprueba el entorno
 requirements.txt      dependencias de ejecución (solo dos)
 requirements-dev.txt  + black, ruff, pytest
-pyproject.toml        metadatos del paquete
+pyproject.toml        metadatos del paquete, ruff/black, entry point `analyze`
 
 analyze.py            CLI unificado (--backend, --compare)
 analyze-google        atajo: API de Google
 analyze-local         atajo: LLM local
-main.py               referencia comentada de los 12 análisis
+main.py               referencia comentada de los 12 análisis (API de Google)
 
 nlp_local/            implementación compatible con Ollama
+  __init__.py           fachada language_v1 (reexporta los tipos de Google)
   client.py             LanguageServiceClient drop-in
-  backend.py            motor de inferencia (modelo reemplazable)
+  backend.py            motor de inferencia (modelo reemplazable) + caché
   prompts.py            prompts calibrados contra el maestro
   convert.py            JSON del modelo -> protos de Google
   linking.py            entity linking real contra Wikidata
 parity/               arnés de paridad (Google como maestro)
+  corpus.py             20 textos y el plan de qué análisis corre sobre cuáles
+  harness.py            corre ambos motores, compara y reporta
+  metrics.py            una métrica 0-100 por análisis
+tests/                pruebas unitarias offline (pytest)
+docs/                 arquitectura, especificación y pruebas
+.github/workflows/    revisión automática de PR con un LLM (ver docs/TESTING.md)
 ```
 
-[`main.py`](main.py) es la **referencia**: cada análisis documentado con cuándo usarlo, cuándo no, cómo leer la salida y ejemplos con valores reales medidos. Corre sin modificaciones contra cualquiera de los dos motores. Los ejecutables son la **herramienta**.
+[`main.py`](main.py) es la **referencia**: cada análisis documentado con cuándo usarlo, cuándo no, cómo leer la
+salida y ejemplos con valores reales medidos. Usa directamente la API de Google. Los ejecutables son la
+**herramienta**.
+
+---
+
+## Configuración
+
+| Variable | Por defecto | Uso |
+|---|---|---|
+| `NLP_LOCAL_MODEL` | `qwen3.8:27b-mlx` | Modelo de Ollama del motor local |
+| `OLLAMA_HOST` | `http://localhost:11434` | Servidor Ollama |
+| `NLP_LOCAL_USER_AGENT` | `nlp-local/0.1 (…)` | `User-Agent` para las consultas a Wikidata |
+| `GOOGLE_APPLICATION_CREDENTIALS` | — | Llave de cuenta de servicio, si no usas ADC |
+
+Archivos locales que **no** van a git (todos en `.gitignore`):
+
+| Archivo | Qué es |
+|---|---|
+| `.venv/` | Entorno virtual creado por `setup.sh` |
+| `key.json` | Llave opcional de cuenta de servicio de Google (preferible usar ADC) |
+| `nlp_local/.cache_llm.json` | Caché de inferencias del LLM (clave: modelo + prompt + texto) |
+| `nlp_local/.cache_wikidata.json` | Caché de búsquedas y resoluciones en Wikidata |
+| `parity/.cache_google.json` | Respuestas de Google guardadas por el arnés |
+
+Las cachés se pueden borrar en cualquier momento: solo cuestan tiempo de inferencia o cuota al regenerarse.
+
+---
+
+## Pruebas
+
+```bash
+./setup.sh --dev
+```
+
+```bash
+.venv/bin/python -m pytest
+```
+
+77 pruebas unitarias offline: el LLM, Ollama, Wikidata y la API de Google se simulan. El arnés de paridad
+(`python -m parity.harness`) es la verificación contra los servicios reales y se corre a mano. Detalle, inventario
+y resultado en [docs/TESTING.md](docs/TESTING.md).
+
+No hay despliegue: es una herramienta que corre en la máquina de quien la usa. El workflow de GitHub Actions solo
+hace revisión automática de pull requests; no corre pruebas.
+
+---
+
+## Estado y limitaciones
+
+- Versión `0.1.0` (`pyproject.toml`), marcada como *Beta*.
+- El motor local **no** lee de Cloud Storage, **no** implementa la API v2 y hace una inferencia por feature en
+  `annotate_text`.
+- La detección automática de idioma del motor local solo distingue español e inglés; declara `--language` para
+  otros idiomas.
+- `annotate_text` local no aplica *entity linking* aunque el cliente se cree con `entity_linking=True`.
+- Los prompts están calibrados contra `qwen3.8:27b-mlx`; con otro modelo conviene medir antes con
+  `python -m parity.harness --model ...`.
+- Los resultados de paridad publicados no se pueden reproducir sin credenciales de Google y un modelo local.
 
 ---
 
@@ -703,11 +860,11 @@ gcloud auth application-default set-quota-project TU_PROYECTO
 
 No hace falta para desarrollo local, y es preferible no tenerlo: una clave de cuenta de servicio es una credencial **de vida ilimitada** que queda en disco y funciona para quien la copie. Google mismo la considera la opción menos recomendable cuando existe alternativa.
 
-Solo la necesitas para **desplegar en un servidor**, donde no hay un humano que pueda hacer login. En ese caso deja el archivo como `key.json` junto a `main.py` y el código lo detecta y lo usa automáticamente. Ya está en `.gitignore`; **no lo subas**.
+Solo la necesitas para **desplegar en un servidor**, donde no hay un humano que pueda hacer login. En ese caso deja el archivo como `key.json` junto a `main.py` y `main.py` lo detecta y lo usa automáticamente. `analyze.py` y el arnés no lo buscan: para ellos exporta `GOOGLE_APPLICATION_CREDENTIALS=./key.json`. Ya está en `.gitignore`; **no lo subas**.
 
 ### Opción B — LLM local
 
-**1. Instala [Ollama](https://ollama.com)** y descarga un modelo. Cualquiera con buen seguimiento de instrucciones sirve; los prompts están calibrados contra `qwen3.8:27b-mlx`.
+**1. Instala [Ollama](https://ollama.com)** y descarga un modelo. Cualquiera con buen seguimiento de instrucciones sirve; los prompts están calibrados contra `qwen3.8:27b-mlx`. Ese es también el modelo por defecto si no indicas otro.
 
 ```bash
 ollama pull qwen3:32b
